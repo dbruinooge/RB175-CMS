@@ -8,3 +8,5 @@ gem "minitest"
 gem "rack-test"
 gem "puma"
 gem "redcarpet"
+gem 'yaml'
+gem 'bcrypt'

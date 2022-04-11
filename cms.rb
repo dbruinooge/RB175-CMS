@@ -3,6 +3,8 @@ require "sinatra/reloader" if development?
 # require "sinatra/content_for"
 require "tilt/erubis"
 require "redcarpet"
+require 'yaml'
+require 'bcrypt'
 
 configure do
   enable :sessions
@@ -34,6 +36,38 @@ def data_path
   end
 end
 
+def user_signed_in?
+  session[:username]
+end
+
+def require_signed_in_user
+  unless user_signed_in?
+    session[:message] = "You must be signed in to do that."
+    redirect "/"
+  end
+end
+
+def load_user_credentials
+  credentials_path = if ENV["RACK_ENV"] == "test"
+    File.expand_path("../test/users.yml", __FILE__)
+  else
+    File.expand_path("../users.yml", __FILE__)
+  end
+  YAML.load_file(credentials_path)
+end
+
+def valid_credentials?(username, password)
+  credentials = load_user_credentials
+
+  if credentials.key?(username)
+    bcrypt_password = BCrypt::Password.new(credentials[username])
+    bcrypt_password == password
+  else
+    false
+  end
+end
+
+# View the index
 get "/" do
   pattern = File.join(data_path, "*")
   @files = Dir.glob(pattern).map do |path|
@@ -42,13 +76,17 @@ get "/" do
   erb :index
 end
 
+# View the signin page
 get "/users/signin" do
   erb :signin
 end
 
+# Sign in to the site
 post "/users/signin" do
-  if params[:username] == "admin" && params[:password] == "secret"
-    session[:username] = params[:username]
+  username = params[:username]
+
+  if valid_credentials?(username, params[:password])
+    session[:username] = username
     session[:message] = "Welcome!"
     redirect "/"
   else
@@ -58,17 +96,22 @@ post "/users/signin" do
   end
 end
 
+# Sign out from the site
 post "/users/signout" do
   session.delete(:username)
   session[:message] = "You have been signed out."
   redirect "/"
 end
 
+# View the new document page
 get "/new" do
+  require_signed_in_user
   erb :new
 end
 
+# Create a new document
 post "/create" do
+  require_signed_in_user
   filename = params[:filename].to_s
 
   if filename.size == 0
@@ -85,7 +128,9 @@ post "/create" do
   end
 end
 
+# View the document edit page
 get "/:filename/edit" do
+  require_signed_in_user
   file_path = File.join(data_path, params[:filename])
 
   @filename = params[:filename]
@@ -94,6 +139,18 @@ get "/:filename/edit" do
   erb :edit
 end
 
+# Delete a document
+post "/:filename/delete" do
+  require_signed_in_user
+  file_path = File.join(data_path, params[:filename])
+
+  File.delete(file_path)
+
+  session[:message] = "#{params[:filename]} has been deleted."
+  redirect "/"
+end
+
+# View a specific document
 get "/:filename" do
   file_path = File.join(data_path, params[:filename])
 
@@ -105,16 +162,9 @@ get "/:filename" do
   end
 end
 
-post "/:filename/delete" do
-  file_path = File.join(data_path, params[:filename])
-
-  File.delete(file_path)
-
-  session[:message] = "#{params[:filename]} has been deleted."
-  redirect "/"
-end
-
+# Submit an updated document
 post "/:filename" do
+  require_signed_in_user
   file_path = File.join(data_path, params[:filename])
 
   File.write(file_path, params[:content])
